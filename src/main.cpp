@@ -5,6 +5,7 @@
 #include <ThingsBoard.h>
 #include <Adafruit_Sensor.h>
 // Pin definitions
+// Pin definitions
 const int DHT_PIN = 4;        // DHT22 sensor
 const int LIGHT_SENSOR_ADDRESS = 0x23;  // I2C address of light sensor
 
@@ -44,62 +45,81 @@ void setup() {
   // Connect to ThingsBoard
   if (!tb.connect(thingsboardServer, token)) {
     Serial.println("Failed to connect to ThingsBoard");
+    ESP.restart();
     while (1);
   }
 }
 
 void loop() {
-  static unsigned long lastTempTime = 0;       
-  static unsigned long lastHumidityTime = 0;   
-  static unsigned long lastLightTime = 0;      
+  static unsigned long lastTempTime = 0;
+  static unsigned long lastHumidityTime = 0;
+  static unsigned long lastLightTime = 0;
+  static bool isConnected = false; // Track ThingsBoard connection status
+  static unsigned long lastConnectionAttempt = 0; // Track last connection attempt
 
-
-  if (millis() - lastTempTime >= 1000) {
-    float temperature = dht.readTemperature();  // Make the DHT11 read the temperature
-    if (!isnan(temperature)) {                   // If the temperature is not a number, print the temperature
-      Serial.print("Temperature: ");             // Print the temperature
-      Serial.print(temperature);
-      Serial.println(" C");
-      
-      // Send temperature data to ThingsBoard
-      tb.sendTelemetryFloat("temperature", temperature);
-    } else {
-      Serial.println("Error reading temperature!");  // If the temperature is a number, print an error message
+  // Check if ThingsBoard is connected
+  if (!isConnected) {
+    if (millis() - lastConnectionAttempt >= 2000) { // Retry every 2 seconds
+      // Attempt to reconnect to ThingsBoard
+      if (tb.connect(thingsboardServer, token)) {
+        Serial.println("Connected to ThingsBoard");
+        isConnected = true;
+      } else {
+        Serial.println("Failed to connect to ThingsBoard. Retrying...");
+        lastConnectionAttempt = millis();
+      }
     }
-    lastTempTime = millis();  // This is to make the temperature read every 7 seconds
   }
 
+  // Read temperature every 5 seconds
+  if (millis() - lastTempTime >= 5000) {
+    float temperature = dht.readTemperature();
+    if (!isnan(temperature)) {
+      Serial.print("Temperature: ");
+      Serial.print(temperature);
+      Serial.println(" °C");
+      tb.sendTelemetryFloat("temperature", temperature);
+    } else {
+      Serial.println("Error reading temperature!");
+    }
+    lastTempTime = millis();
+  }
 
-  if (millis() - lastHumidityTime >= 1000) {  
-    float humidity = dht.readHumidity();      // Make the DHT11 read the humidity
-    if (!isnan(humidity)) {                    // If the humidity is not a number, print the humidity
-      Serial.print("Humidity: ");              // Print the humidity
+  // Read humidity every 5 seconds
+  if (millis() - lastHumidityTime >= 5000) {
+    float humidity = dht.readHumidity();
+    if (!isnan(humidity)) {
+      Serial.print("Humidity: ");
       Serial.print(humidity);
       Serial.println(" %");
-      
-      // Send humidity data to ThingsBoard
       tb.sendTelemetryFloat("humidity", humidity);
     } else {
-      Serial.println("Error reading humidity!");  // If the humidity is a number, print an error message
+      Serial.println("Error reading humidity!");
     }
     lastHumidityTime = millis();
   }
 
-
-  if (millis() - lastLightTime >= 1000) {
-    uint16_t lux = lightMeter.readLightLevel();  // To make the BH1750 read the light level
-    if (!isnan(lux)) {                           // If the light level is not a number, print the light level
+  // Read light intensity every 5 seconds
+  if (millis() - lastLightTime >= 5000) {
+    uint16_t lux = lightMeter.readLightLevel();
+    if (!isnan(lux)) {
       Serial.print("Light: ");
       Serial.print(lux);
       Serial.println(" lux");
-      // Send light level data to ThingsBoard
       tb.sendTelemetryFloat("light", lux);
     } else {
-      Serial.println("Error reading light level!");  // If the light level is a number, print an error message
+      Serial.println("Error reading light level!");
     }
-    lastLightTime = millis();  
+    lastLightTime = millis();
   }
 
   // Process ThingsBoard events
   tb.loop();
+
+  // Check if disconnected from ThingsBoard
+  if (isConnected && !tb.connected()) {
+    Serial.println("Disconnected from ThingsBoard. Reconnecting...");
+    isConnected = false;
+    lastConnectionAttempt = millis();
+  }
 }
